@@ -74,7 +74,7 @@ if st.sidebar.button("▶️ Run Simulation Step"):
     st.session_state['isolation'] = determine_isolation_action(st.session_state['analysis'], sample)
 
 # --- Main Dashboard Display ---
-st.title("⚡ Real-Time Grid Monitoring Dashboard")
+st.title("⚡ Real-Time LT Line Monitoring Dashboard")
 
 if 'analysis' not in st.session_state:
     st.info("Click '▶️ Run Simulation Step' in the sidebar to begin.")
@@ -113,12 +113,14 @@ else:
     )
     
     node_adjacencies = [len(adj) for node, adj in G.adjacency()]
-    node_trace.marker.color = node_adjacencies
     node_text = [f'Bus #{i}<br>Connections: {adj}' for i, adj in enumerate(node_adjacencies)]
     node_trace.text = node_text
 
-    # Highlight faulted nodes
+    # Highlight faulted nodes and grey out others
     if analysis['status'] == 'FAULT DETECTED':
+        # Default all nodes to a grey color to make faults stand out
+        node_colors = ['#808080'] * len(G.nodes()) # Medium grey
+        
         symptomatic_bus_indices = []
         voltage_cols = sorted([col for col in df.columns if col.startswith('V_')])
         for bus_key in analysis['symptomatic_buses']:
@@ -130,20 +132,30 @@ else:
             except (ValueError, IndexError):
                 continue # Ignore if parsing fails
 
-        node_marker_colors = list(node_adjacencies)
+        # Set symptomatic buses to red
         for i in symptomatic_bus_indices:
-            node_marker_colors[i] = 'red'
-        node_trace.marker.color = node_marker_colors
+            if i < len(node_colors):
+                node_colors[i] = 'red'
+        
+        node_trace.marker.color = node_colors
+        # Hide the colorscale when it's not relevant (in fault mode)
+        node_trace.marker.showscale = False
+    else:
+        # In normal operation, color by number of connections
+        node_trace.marker.color = node_adjacencies
+        node_trace.marker.showscale = True
 
 
     fig = go.Figure(data=[edge_trace, node_trace],
                 layout=go.Layout(
                     template='plotly_dark',
-                    # --- THIS SECTION IS NOW CORRECT ---
                     title=dict(text='Interactive Grid Topology', font=dict(size=20)),
                     showlegend=False,
                     hovermode='closest',
                     margin=dict(b=20,l=5,r=5,t=40),
+                    # These two lines make the plot background transparent
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                 )
