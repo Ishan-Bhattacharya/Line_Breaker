@@ -127,22 +127,29 @@ else:
     node_text = [f'Bus #{i}<br># of connections: {adj}' for i, adj in enumerate(node_adjacencies)]
     node_trace.text = node_text
 
-    fig = go.Figure(data=[edge_trace, node_trace],
-                 layout=go.Layout(
-                    title=dict(text='Interactive Grid Topology', font=dict(size=20)),
-                    template='plotly_dark',
-                    showlegend=False,
-                    hovermode='closest',
-                    margin=dict(b=20, l=5, r=5, t=40),
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    # *** NEW: Explicitly define the hover label style ***
-                    hoverlabel=dict(
-                        bgcolor="black",   # Set background to black
-                        font_size=14,      # Set font size
-                        font_family="Arial", # Set font family
-                        font_color="white" # Set font color to white
-                    )
-                 ))
+    # Create the figure object first
+    fig = go.Figure(data=[edge_trace, node_trace])
+
+    # *** NEW: Apply layout updates AFTER creation for robustness ***
+    fig.update_layout(
+        template='plotly_dark',  # Primary theme setting
+        title=dict(text='Interactive Grid Topology', font=dict(size=20)),
+        showlegend=False,
+        hovermode='closest',
+        margin=dict(b=20, l=5, r=5, t=40),
+        # Explicitly set background colors to prevent theme conflicts
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        # Keep the explicit hover label style as a final override
+        hoverlabel=dict(
+            bgcolor="black",
+            font_size=14,
+            font_family="Arial",
+            font_color="white"
+        )
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
