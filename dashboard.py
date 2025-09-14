@@ -7,7 +7,7 @@ from fault_logic import calculate_current_threshold, check_fault_status, determi
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Power Grid Fault Monitoring",
+    page_title="LT Line Fault Monitoring",
     page_icon="⚡",
     layout="wide"
 )
@@ -21,9 +21,10 @@ DATA_FILE_PATH = "synthetic_lt_break_dataset(1).csv"
 def load_data_and_prepare(file_path):
     """Loads data, calculates thresholds, and prepares a placeholder graph."""
     try:
+        # Load the data ONCE here.
         df = pd.read_csv(file_path)
     except FileNotFoundError:
-        st.error(f"Fatal Error: Data file not found at '{file_path}'. Please check the filename and path.")
+        st.error(f"Fatal Error: Data file not found at '{file_path}'. Please ensure the dataset is in the correct folder.")
         st.stop()
     except Exception as e:
         st.error(f"Error reading CSV file: {e}. Please ensure it's a valid CSV file.")
@@ -34,7 +35,10 @@ def load_data_and_prepare(file_path):
     pos = nx.spring_layout(G, seed=42)
     
     voltage_thresh = 0.90
-    current_thresh = calculate_current_threshold(file_path)
+    
+    # MODIFIED: Pass the loaded DataFrame to the calculation function.
+    # This is more efficient as it avoids reading the file twice.
+    current_thresh = calculate_current_threshold(df)
     
     return df, G, pos, voltage_thresh, current_thresh
 
@@ -60,11 +64,12 @@ if st.sidebar.button("▶️ Run Simulation Step"):
         if not severe_faults_df.empty:
             sample = severe_faults_df.sample(1).iloc[0].to_dict()
         else:
-            st.error("No faults in the dataset meet the detection criteria. Displaying a random 'break' sample instead.")
+            st.warning("No faults in the dataset meet the detection criteria. Displaying a random 'break' sample instead.")
             sample = fault_df.sample(1).iloc[0].to_dict()
-    else:
+    else: # Random Event
         sample = df.sample(1).iloc[0].to_dict()
     
+    st.session_state['current_sample'] = sample
     st.session_state['analysis'] = check_fault_status(sample, V_THRESHOLD, I_THRESHOLD)
     st.session_state['isolation'] = determine_isolation_action(st.session_state['analysis'], sample)
 
@@ -85,6 +90,7 @@ else:
     col2.metric("Maximum Current (A)", f"{analysis['max_current']:.2f}")
     col3.metric("Isolation Action", f"{isolation['action']}: {isolation['element_to_open'] or 'N/A'}")
 
+    # --- Graph Drawing Logic ---
     edge_x, edge_y = [], []
     for edge in G.edges():
         x0, y0 = pos[edge[0]]
@@ -96,60 +102,51 @@ else:
     node_y = [pos[node][1] for node in G.nodes()]
 
     edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=1, color='gray'), hoverinfo='none', mode='lines')
+    
     node_trace = go.Scatter(
         x=node_x, y=node_y, mode='markers', hoverinfo='text',
         marker=dict(
-            showscale=True, colorscale='YlGnBu', size=10, color=[],
-            colorbar=dict(thickness=15, title=dict(text='Node Connections', side='right'), xanchor='left')
+            showscale=True, colorscale='YlGnBu', size=12,
+            colorbar=dict(thickness=15, title='Node Connections'),
+            line_width=2
         )
     )
     
     node_adjacencies = [len(adj) for node, adj in G.adjacency()]
-    node_colors = node_adjacencies
-    
-    if analysis['status'] == 'FAULT DETECTED':
-        node_colors = ['#333F44'] * len(G.nodes())
-        try:
-            voltage_cols = [col for col in df.columns if col.startswith('V_')]
-            bus_name_map = {name.split('_')[1]: i for i, name in enumerate(voltage_cols)}
-            symptomatic_bus_indices = []
-            for bus_key in analysis['symptomatic_buses']:
-                bus_name = bus_key.split('_')[1]
-                if bus_name in bus_name_map:
-                    symptomatic_bus_indices.append(bus_name_map[bus_name])
-            for i in symptomatic_bus_indices:
-                if i < len(node_colors):
-                    node_colors[i] = 'red'
-        except Exception as e:
-            st.warning(f"Could not parse bus names to highlight nodes. Error: {e}")
-
-    node_trace.marker.color = node_colors
-    node_text = [f'Bus #{i}<br># of connections: {adj}' for i, adj in enumerate(node_adjacencies)]
+    node_trace.marker.color = node_adjacencies
+    node_text = [f'Bus #{i}<br>Connections: {adj}' for i, adj in enumerate(node_adjacencies)]
     node_trace.text = node_text
 
-    # Create the figure object first
-    fig = go.Figure(data=[edge_trace, node_trace])
+    # Highlight faulted nodes
+    if analysis['status'] == 'FAULT DETECTED':
+        symptomatic_bus_indices = []
+        voltage_cols = sorted([col for col in df.columns if col.startswith('V_')])
+        for bus_key in analysis['symptomatic_buses']:
+            try:
+                # Extracts the index from a name like 'V_Bus1' -> 1
+                bus_index = int(bus_key.split('_')[1].replace('Bus',''))
+                if 0 <= bus_index < len(G.nodes()):
+                    symptomatic_bus_indices.append(bus_index)
+            except (ValueError, IndexError):
+                continue # Ignore if parsing fails
 
-    # *** NEW: Apply layout updates AFTER creation for robustness ***
-    fig.update_layout(
-        template='plotly_dark',  # Primary theme setting
-        title=dict(text='Interactive Grid Topology', font=dict(size=20)),
-        showlegend=False,
-        hovermode='closest',
-        margin=dict(b=20, l=5, r=5, t=40),
-        # Explicitly set background colors to prevent theme conflicts
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        # Keep the explicit hover label style as a final override
-        hoverlabel=dict(
-            bgcolor="black",
-            font_size=14,
-            font_family="Arial",
-            font_color="white"
-        )
-    )
+        node_marker_colors = list(node_adjacencies)
+        for i in symptomatic_bus_indices:
+            node_marker_colors[i] = 'red'
+        node_trace.marker.color = node_marker_colors
+
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+                layout=go.Layout(
+                    template='plotly_dark',
+                    # --- THIS SECTION IS NOW CORRECT ---
+                    title=dict(text='Interactive Grid Topology', font=dict(size=20)),
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=20,l=5,r=5,t=40),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
 
     st.plotly_chart(fig, use_container_width=True)
 
