@@ -1,6 +1,4 @@
 streamlit
 pandas
-opendssdirect
 networkx
 plotly
-openpyxl
