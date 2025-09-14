@@ -5,26 +5,26 @@ import numpy as np
 
 # --- Threshold Calculation Logic ---
 
-def calculate_current_threshold(file_path: str, sigma_multiplier: int = 6) -> float:
+# MODIFIED: Function now accepts a DataFrame directly instead of a file path.
+def calculate_current_threshold(df: pd.DataFrame, sigma_multiplier: int = 6) -> float:
     """
-    Analyzes the 'normal' data from a CSV dataset to find a robust fault current threshold.
+    Analyzes 'normal' data from a DataFrame to find a robust fault current threshold.
 
     Args:
-        file_path (str): The file path to the synthetic dataset CSV file.
+        df (pd.DataFrame): The DataFrame containing the power grid data.
         sigma_multiplier (int): The number of standard deviations for the threshold.
 
     Returns:
         float: The calculated current threshold in Amps.
     """
-    try:
-        # *** MODIFIED: Use read_csv for .csv files ***
-        df = pd.read_csv(file_path)
-    except FileNotFoundError:
-        print(f"Error: Data file not found at {file_path}. Returning a default threshold.")
-        return 500.0 # Return a safe default if file is missing
-
+    # The function no longer needs to read the CSV file.
+    
     normal_df = df[df['label'] == 'normal']
     
+    if normal_df.empty:
+        print("Warning: No 'normal' data found in the DataFrame. Returning a default threshold.")
+        return 500.0
+
     current_columns = [col for col in normal_df.columns if col.startswith('I_')]
     if not current_columns:
         print("Warning: No current columns ('I_...') found. Returning a default threshold.")
@@ -42,7 +42,7 @@ def calculate_current_threshold(file_path: str, sigma_multiplier: int = 6) -> fl
     return calculated_threshold
 
 
-# --- Analysis Functions (No changes needed here) ---
+# --- Analysis Functions (These are unchanged) ---
 
 def check_fault_status(system_state: dict, v_thresh: float, i_thresh: float):
     """Analyzes a system state snapshot based on provided thresholds."""
@@ -64,6 +64,11 @@ def determine_isolation_action(analysis_result: dict, system_state: dict):
     """Determines which line to open to isolate a fault."""
     if analysis_result["status"] != "FAULT DETECTED":
         return {"action": "NONE", "element_to_open": None}
+    
+    # This check prevents an error if no lines show fault symptoms
+    if not analysis_result["symptomatic_lines"]:
+        return {"action": "NONE", "element_to_open": None}
+
     faulted_line_name = max(
         analysis_result["symptomatic_lines"],
         key=lambda line: system_state[line]
